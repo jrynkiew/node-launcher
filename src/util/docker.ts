@@ -1,28 +1,21 @@
 import { ChildProcess, execFile, spawn } from 'child_process';
-import { Logger } from 'winston';
+import { EventEmitter } from 'events';
+import { DockerEvent } from '../constants';
 
-interface DockerOptions {
-  logger?: Logger
-}
-
-export class Docker {
+export class Docker extends EventEmitter {
 
   _execFile = execFile;
 
   _spawn = spawn;
 
-  _logger?: Logger;
-
   _objectPatt = /({.+})/;
 
   private _logError(err: Error): void {
-    if(this._logger)
-      this._logger.error(`${err.message}\n${err.stack || ''}`);
+    this.emit(DockerEvent.ERROR, err);
   }
 
-  constructor({ logger }: DockerOptions) {
-    if(logger)
-      this._logger = logger;
+  constructor() {
+    super();
   }
 
   public async listNetworks():Promise<{Name: string}[]> {
@@ -208,6 +201,20 @@ export class Docker {
   public kill(name: string): Promise<string> {
     return new Promise(resolve => {
       execFile('docker', ['kill', name], {}, (err, output) => {
+        if(err) {
+          this._logError(err);
+          resolve('');
+        } else {
+          const outputStr = output.toString();
+          resolve(outputStr);
+        }
+      });
+    });
+  }
+
+  public stop(name: string): Promise<string> {
+    return new Promise(resolve => {
+      execFile('docker', ['stop', name], {}, (err, output) => {
         if(err) {
           this._logError(err);
           resolve('');

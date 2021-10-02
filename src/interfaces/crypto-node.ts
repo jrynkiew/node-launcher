@@ -18,6 +18,7 @@ export interface CryptoNodeData {
   dockerImage?: string;
   network?: string;
   peerPort?: number;
+  privKeyPass?: string;
   rpcPort?: number;
   rpcUsername?: string;
   rpcPassword?: string;
@@ -28,13 +29,16 @@ export interface CryptoNodeData {
   dataDir?: string;
   walletDir?: string;
   configPath?: string;
+  domain?: string;
+  address?: string;
 }
 
 export interface CryptoNode {
   _docker: Docker,
   _instance?: ChildProcess;
   _logError(message: string): void;
-  _logInfo(message: string): void;
+  _logOutput(output: string): void;
+  _logClose(exitCode: number): void;
   _requestTimeout: number;
   start(): Promise<ChildProcess>;
   stop(): void;

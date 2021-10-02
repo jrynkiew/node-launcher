@@ -1,7 +1,6 @@
-import { Bitcoin } from '../bitcoin/bitcoin';
+import { Ethereum } from '../ethereum/ethereum';
 import { defaultDockerNetwork, NetworkType, NodeClient, NodeType } from '../../constants';
 import { v4 as uuid } from 'uuid';
-import { generateRandom } from '../../util';
 import { CryptoNodeData, VersionDockerImage } from '../../interfaces/crypto-node';
 import { Docker } from '../../util/docker';
 import { ChildProcess } from 'child_process';
@@ -10,35 +9,41 @@ import path from 'path';
 import fs from 'fs-extra';
 
 const coreConfig = `
-server=1
-listen=1
-txindex=1
-[{{NETWORK}}]
-datadir=/opt/blockchain-data
-walletdir=/opt/blockchain-wallets
-rpcuser={{RPC_USERNAME}}
-rpcpassword={{RPC_PASSWORD}}
-rpcallowip=0.0.0.0/0
-rpcbind=0.0.0.0
-port={{PEER_PORT}}
-rpcport={{RPC_PORT}}
+[parity]
+chain = "/home/parity/.local/share/io.parity.ethereum/spec.json"
+db_path = "/root/data"
+keys_path = "/root/keystore"
+
+[rpc]
+cors = ["all"]
+port = {{RPC_PORT}}
+interface = "all"
+hosts = ["all"]
+apis = ["web3", "eth", "net", "parity", "traces", "rpc", "secretstore"]
+
+[websockets]
+disable = true
+
+[network]
+port = {{PEER_PORT}}
+reserved_peers="/home/parity/.local/share/io.parity.ethereum/bootnodes.txt"
 `;
 
-export class BitcoinCash extends Bitcoin {
+export class Fuse extends Ethereum {
 
-  static versions(client = BitcoinCash.clients[0]): VersionDockerImage[] {
-    client = client || BitcoinCash.clients[0];
+  static versions(client = Fuse.clients[0]): VersionDockerImage[] {
+    client = client || Fuse.clients[0];
     switch(client) {
-      case NodeClient.CORE:
+      case NodeClient.PARITY:
         return [
           {
-            version: '23.0.0',
-            image: 'zquestz/bitcoin-cash-node:23.0.0',
-            dataDir: '/opt/blockchain-data',
-            walletDir: '/opt/blockchain-wallets',
-            configPath: '/opt/bitcoincash.conf',
+            version: '2.5.13',
+            image: 'fusenet/node:1.0.0',
+            dataDir: '/root/data',
+            walletDir: '/root/keystore',
+            configPath: '/root/config.toml',
             generateRuntimeArgs(data: CryptoNodeData): string {
-              return ` -conf=${this.configPath}` + (data.network === NetworkType.TESTNET ? ' -testnet' : '');
+              return ` --config=${this.configPath}`;
             },
           },
         ];
@@ -48,7 +53,7 @@ export class BitcoinCash extends Bitcoin {
   }
 
   static clients = [
-    NodeClient.CORE,
+    NodeClient.PARITY,
   ];
 
   static nodeTypes = [
@@ -57,28 +62,22 @@ export class BitcoinCash extends Bitcoin {
 
   static networkTypes = [
     NetworkType.MAINNET,
-    NetworkType.TESTNET,
   ];
 
   static defaultRPCPort = {
-    [NetworkType.MAINNET]: 8332,
-    [NetworkType.TESTNET]: 18332,
+    [NetworkType.MAINNET]: 8545,
   };
 
   static defaultPeerPort = {
-    [NetworkType.MAINNET]: 8333,
-    [NetworkType.TESTNET]: 18333,
+    [NetworkType.MAINNET]: 30300,
   };
 
-  static generateConfig(client = BitcoinCash.clients[0], network = NetworkType.MAINNET, peerPort = BitcoinCash.defaultPeerPort[NetworkType.MAINNET], rpcPort = BitcoinCash.defaultRPCPort[NetworkType.MAINNET], rpcUsername = generateRandom(), rpcPassword = generateRandom()): string {
+  static generateConfig(client = Fuse.clients[0], network = NetworkType.MAINNET, peerPort = Fuse.defaultPeerPort[NetworkType.MAINNET], rpcPort = Fuse.defaultRPCPort[NetworkType.MAINNET]): string {
     switch(client) {
-      case NodeClient.CORE:
+      case NodeClient.PARITY:
         return coreConfig
-          .replace('{{NETWORK}}', network === NetworkType.MAINNET ? 'main' : 'test')
-          .replace('{{RPC_USERNAME}}', rpcUsername)
-          .replace('{{RPC_PASSWORD}}', rpcPassword)
           .replace('{{PEER_PORT}}', peerPort.toString(10))
-          .replace('{{RPC_PORT}}', rpcPort.toString(10))
+          .replace(/{{RPC_PORT}}/g, rpcPort.toString(10))
           .trim();
       default:
         return '';
@@ -86,7 +85,7 @@ export class BitcoinCash extends Bitcoin {
   }
 
   id: string;
-  ticker = 'bch';
+  ticker = 'fuse';
   version: string;
   dockerImage: string;
   network: string;
@@ -106,27 +105,28 @@ export class BitcoinCash extends Bitcoin {
     super(data, docker);
     this.id = data.id || uuid();
     this.network = data.network || NetworkType.MAINNET;
-    this.peerPort = data.peerPort || BitcoinCash.defaultPeerPort[this.network];
-    this.rpcPort = data.rpcPort || BitcoinCash.defaultRPCPort[this.network];
-    this.rpcUsername = data.rpcUsername || generateRandom();
-    this.rpcPassword = data.rpcPassword || generateRandom();
-    this.client = data.client || BitcoinCash.clients[0];
+    this.peerPort = data.peerPort || Fuse.defaultPeerPort[this.network];
+    this.rpcPort = data.rpcPort || Fuse.defaultRPCPort[this.network];
+    this.rpcUsername = data.rpcUsername || '';
+    this.rpcPassword = data.rpcPassword || '';
+    this.client = data.client || Fuse.clients[0];
     this.dockerCpus = data.dockerCpus || this.dockerCpus;
     this.dockerMem = data.dockerMem || this.dockerMem;
     this.dockerNetwork = data.dockerNetwork || this.dockerNetwork;
     this.dataDir = data.dataDir || this.dataDir;
     this.walletDir = data.walletDir || this.dataDir;
     this.configPath = data.configPath || this.configPath;
-    this.version = data.version || BitcoinCash.versions(this.client)[0].version;
-    this.dockerImage = data.dockerImage || BitcoinCash.versions(this.client)[0].image;
+    const versions = Fuse.versions(this.client);
+    this.version = data.version || (versions && versions[0] ? versions[0].version : '');
+    this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = BitcoinCash.versions(this.client).find(({ version }) => version === this.version);
+    const versionData = Fuse.versions(this.client).find(({ version }) => version === this.version);
     if(!versionData)
-      throw new Error(`Unknown version ${this.version}`);
+      throw new Error(`Unknown ${this.ticker} version ${this.version}`);
     const {
       dataDir: containerDataDir,
       walletDir: containerWalletDir,
@@ -141,7 +141,7 @@ export class BitcoinCash extends Bitcoin {
       '--network', this.dockerNetwork,
       '-p', `${this.rpcPort}:${this.rpcPort}`,
       '-p', `${this.peerPort}:${this.peerPort}`,
-      '--entrypoint', 'bitcoind',
+      '--entrypoint', '/usr/local/bin/parity',
     ];
     const tmpdir = os.tmpdir();
     const dataDir = this.dataDir || path.join(tmpdir, uuid());
@@ -171,13 +171,11 @@ export class BitcoinCash extends Bitcoin {
   }
 
   generateConfig(): string {
-    return BitcoinCash.generateConfig(
+    return Fuse.generateConfig(
       this.client,
       this.network,
       this.peerPort,
-      this.rpcPort,
-      this.rpcUsername,
-      this.rpcPassword);
+      this.rpcPort);
   }
 
 }

@@ -13,6 +13,7 @@ export const NodeClient = {
   CORE: 'CORE',
   GETH: 'GETH',
   OPEN_ETHEREUM: 'OPEN_ETHEREUM',
+  PARITY: 'PARITY',
 };
 
 export const Status = {
@@ -22,3 +23,13 @@ export const Status = {
 };
 
 export const defaultDockerNetwork = 'da-node-runner-network';
+
+export const NodeEvent = {
+  CLOSE: 'CLOSE',
+  ERROR: 'ERROR',
+  OUTPUT: 'OUTPUT',
+};
+
+export const DockerEvent = {
+  ERROR: 'ERROR',
+};

@@ -2,7 +2,7 @@ import 'should';
 import { Litecoin } from './litecoin/litecoin';
 import { Docker } from '../util/docker';
 import { CryptoNodeData } from '../interfaces/crypto-node';
-import { NetworkType, NodeType, Status } from '../constants';
+import { NetworkType, NodeEvent, NodeType, Status } from '../constants';
 import { v4 as uuid } from 'uuid';
 import { ChildProcess } from 'child_process';
 import { timeout } from '../util';
@@ -14,6 +14,8 @@ import { Ethereum } from './ethereum/ethereum';
 import { Xdai } from './xdai/xdai';
 import { BinanceSC } from './binance-sc/binance-sc';
 import { Avalanche } from './avalanche/avalanche';
+import { Pocket } from './pocket/pocket';
+import { Fuse } from './fuse/fuse';
 
 const chains: [{name: string, constructor: any}] = [
   {name: 'Bitcoin', constructor: Bitcoin},
@@ -25,6 +27,8 @@ const chains: [{name: string, constructor: any}] = [
   {name: 'BinanceSC', constructor: BinanceSC},
   {name: 'Xdai', constructor: Xdai},
   {name: 'Avalanche', constructor: Avalanche},
+  {name: 'Pocket', constructor: Pocket},
+  {name: 'Fuse', constructor: Fuse},
 ];
 
 chains.forEach(({ name, constructor: NodeConstructor }) => {
@@ -33,7 +37,7 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
 
     this.timeout(30000);
 
-    const docker = new Docker({});
+    const docker = new Docker();
     let node;
     const initialNodeData: CryptoNodeData = {
       id: 'test-id',
@@ -81,9 +85,9 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
     });
     describe(`static ${name}.networkTypes`, function() {
       it('should be an array of network type strings', function() {
-        Litecoin.networkTypes.should.be.an.Array();
-        Litecoin.networkTypes.length.should.be.greaterThan(0);
-        Litecoin.networkTypes.every(t => NetworkType[t]).should.be.True();
+        NodeConstructor.networkTypes.should.be.an.Array();
+        NodeConstructor.networkTypes.length.should.be.greaterThan(0);
+        NodeConstructor.networkTypes.every(t => NetworkType[t]).should.be.True();
       });
     });
     describe(`static ${name}.defaultRPCPort`, function() {
@@ -99,30 +103,30 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
     });
     describe(`static ${name}.defaultPeerPort`, function() {
       it('should be an object mapping network type to port number', function() {
-        Litecoin.defaultPeerPort.should.be.an.Object();
-        const keys = Object.keys(Litecoin.defaultPeerPort);
+        NodeConstructor.defaultPeerPort.should.be.an.Object();
+        const keys = Object.keys(NodeConstructor.defaultPeerPort);
         keys.length.should.be.greaterThan(0);
-        keys.length.should.equal(Litecoin.networkTypes.length);
+        keys.length.should.equal(NodeConstructor.networkTypes.length);
         // @ts-ignore
         keys.every(k => NetworkType[k]).should.be.True();
-        Object.values(Litecoin.defaultPeerPort).every(v => v.should.be.a.Number());
+        Object.values(NodeConstructor.defaultPeerPort).every(v => v.should.be.a.Number());
       });
     });
     describe(`static ${name}.defaultCPUs`, function() {
       it('should be the default CPU number', function() {
-        Litecoin.defaultCPUs.should.be.a.Number();
-        Litecoin.defaultCPUs.should.be.greaterThan(0);
+        NodeConstructor.defaultCPUs.should.be.a.Number();
+        NodeConstructor.defaultCPUs.should.be.greaterThan(0);
       });
     });
     describe(`static ${name}.defaultMem`, function() {
       it('should be the default memory size', function() {
-        Litecoin.defaultMem.should.be.a.Number();
-        Litecoin.defaultMem.should.be.greaterThan(0);
+        NodeConstructor.defaultMem.should.be.a.Number();
+        NodeConstructor.defaultMem.should.be.greaterThan(0);
       });
     });
     describe(`static ${name}.generateConfig()`, function() {
       it('should generate a default config file', function() {
-        const config = Litecoin.generateConfig();
+        const config = NodeConstructor.generateConfig();
         config.should.be.a.String();
         config.length.should.be.greaterThan(0);
       });
@@ -170,6 +174,7 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
             const instance = await node.start();
             instance.should.be.an.instanceOf(ChildProcess);
             await new Promise(resolve => setTimeout(resolve, 2000));
+            const items = await docker.ps
             await new Promise(resolve => {
               node._instance.on('close', resolve);
               node._instance.kill();
@@ -198,6 +203,11 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
               client,
             });
             await node.start();
+            // node
+            //   .on(NodeEvent.ERROR, console.error)
+            //   .on(NodeEvent.OUTPUT, console.log)
+            //   .on(NodeEvent.CLOSE, (exitCode: number) => console.log(`Exited with code ${exitCode}`));
+
             // Give the node a little time to connect and get up and running
             await timeout(60000 * .5);
           });
