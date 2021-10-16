@@ -49,7 +49,7 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
       rpcUsername: 'some username',
       rpcPassword: 'some password',
       client: NodeConstructor.clients[0],
-      dockerCpus: 4,
+      dockerCPUs: 4,
       dockerMem: 4096,
       dockerNetwork: 'some network',
       dataDir: '/some/dir',
@@ -60,9 +60,9 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
     it('should be a constructor', function() {
       NodeConstructor.should.be.a.constructor();
     });
-    describe(`static ${name}.versions`, function () {
+    describe(`static ${name}.versions`, function() {
       it('should return an array of version data objects', function () {
-        const versions = NodeConstructor.versions();
+        const versions = NodeConstructor.versions(NodeConstructor.clients[0], NodeConstructor.networkTypes[0]);
         versions.should.be.an.Array();
         versions.forEach(v => {
           v.should.be.an.Object();
@@ -197,12 +197,24 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
 
           this.timeout(60000 * 30);
 
+          let remoteNode;
+
           before(async function() {
             node = new NodeConstructor({
               network,
               client,
             });
             await node.start();
+            remoteNode = new NodeConstructor({
+              network,
+              client,
+              rpcUsername: node.rpcUsername,
+              rpcPassword: node.rpcPassword,
+              rpcPort: node.rpcPort,
+              remote: true,
+              remoteDomain: 'localhost',
+              remoteProtocol: 'http',
+            });
             // node
             //   .on(NodeEvent.ERROR, console.error)
             //   .on(NodeEvent.OUTPUT, console.log)
@@ -219,10 +231,23 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
               version.should.equal(node.version);
             });
           });
+          describe(`Remote ${name}.rpcGetVersion()`, function() {
+            it('should resolve with the remote client version', async function() {
+              const version = await remoteNode.rpcGetVersion();
+              version.should.be.a.String();
+              version.should.equal(node.version);
+            });
+          });
           describe(`${name}.rpcGetBlockCount()`, function() {
             it('should resolve with the current block count number', async function() {
               const blockCount = await node.rpcGetBlockCount();
-              blockCount.should.be.a.Number();
+              blockCount.should.be.a.String();
+            });
+          });
+          describe(`Remote ${name}.rpcGetBlockCount()`, function() {
+            it('should resolve with the current block count number', async function() {
+              const blockCount = await remoteNode.rpcGetBlockCount();
+              blockCount.should.be.a.String();
             });
           });
           describe(`${name}.getCPUUsage()`, function() {
@@ -250,6 +275,14 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
               time.should.be.greaterThan(0);
             });
           });
+          describe(`Remote ${name}.getStatus() running`, function() {
+            it('should resolve with the current remote node status', async function() {
+              const currentStatus = await remoteNode.getStatus();
+              currentStatus.should.be.a.String();
+              currentStatus.should.not.equal(Status.STOPPED);
+              Object.values(Status).includes(currentStatus).should.be.True();
+            });
+          });
           describe(`${name}.getStatus()`, function() {
             it('should resolve with the current node status', async function() {
               const runningStatus = await node.getStatus();
@@ -259,6 +292,13 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
               await node.stop();
               const stoppedStatus = await node.getStatus();
               stoppedStatus.should.equal(Status.STOPPED);
+            });
+          });
+          describe(`Remote ${name}.getStatus() stopped`, function() {
+            it('should resolve with the current remote node status', async function() {
+              const currentStatus = await remoteNode.getStatus();
+              currentStatus.should.be.a.String();
+              currentStatus.should.equal(Status.STOPPED);
             });
           });
         });

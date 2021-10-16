@@ -1,7 +1,7 @@
 import { Bitcoin } from '../bitcoin/bitcoin';
 import { defaultDockerNetwork, NetworkType, NodeClient, NodeType } from '../../constants';
 import { v4 as uuid } from 'uuid';
-import { generateRandom } from '../../util';
+import { filterVersionsByNetworkType, generateRandom } from '../../util';
 import { CryptoNodeData, VersionDockerImage } from '../../interfaces/crypto-node';
 import { Docker } from '../../util/docker';
 import { ChildProcess } from 'child_process';
@@ -26,25 +26,30 @@ rpcport={{RPC_PORT}}
 
 export class Dash extends Bitcoin {
 
-  static versions(client = Dash.clients[0]): VersionDockerImage[] {
+  static versions(client: string, networkType: string): VersionDockerImage[] {
     client = client || Dash.clients[0];
+    let versions: VersionDockerImage[];
     switch(client) {
       case NodeClient.CORE:
-        return [
+        versions = [
           {
             version: '0.16.1.1',
+            clientVersion: '0.16.1.1',
             image: 'blocknetdx/dash:v0.16.1.1',
             dataDir: '/opt/blockchain/data',
             walletDir: '/opt/blockchain/wallets',
             configPath: '/opt/blockchain/dash.conf',
+            networks: [NetworkType.MAINNET, NetworkType.TESTNET],
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` dashd -printtoconsole -conf=${this.configPath}` + (data.network === NetworkType.TESTNET ? ' -testnet' : '');
             },
           },
         ];
+        break;
       default:
-        return [];
+        versions = [];
     }
+    return filterVersionsByNetworkType(networkType, versions);
   }
 
   static clients = [
@@ -70,6 +75,10 @@ export class Dash extends Bitcoin {
     [NetworkType.TESTNET]: 19999,
   };
 
+  static defaultCPUs = 4;
+
+  static defaultMem = 8192;
+
   static generateConfig(client = Dash.clients[0], network = NetworkType.MAINNET, peerPort = Dash.defaultPeerPort[NetworkType.MAINNET], rpcPort = Dash.defaultRPCPort[NetworkType.MAINNET], rpcUsername = generateRandom(), rpcPassword = generateRandom()): string {
     switch(client) {
       case NodeClient.CORE:
@@ -87,6 +96,7 @@ export class Dash extends Bitcoin {
 
   id: string;
   ticker = 'dash';
+  name = 'Dash';
   version: string;
   dockerImage: string;
   network: string;
@@ -95,8 +105,8 @@ export class Dash extends Bitcoin {
   rpcUsername: string;
   rpcPassword: string;
   client: string;
-  dockerCpus = 4;
-  dockerMem = 4096;
+  dockerCPUs = Dash.defaultCPUs;
+  dockerMem = Dash.defaultMem;
   dockerNetwork = defaultDockerNetwork;
   dataDir = '';
   walletDir = '';
@@ -111,20 +121,27 @@ export class Dash extends Bitcoin {
     this.rpcUsername = data.rpcUsername || generateRandom();
     this.rpcPassword = data.rpcPassword || generateRandom();
     this.client = data.client || Dash.clients[0];
-    this.dockerCpus = data.dockerCpus || this.dockerCpus;
+    this.dockerCPUs = data.dockerCPUs || this.dockerCPUs;
     this.dockerMem = data.dockerMem || this.dockerMem;
     this.dockerNetwork = data.dockerNetwork || this.dockerNetwork;
     this.dataDir = data.dataDir || this.dataDir;
     this.walletDir = data.walletDir || this.dataDir;
     this.configPath = data.configPath || this.configPath;
-    this.version = data.version || Dash.versions(this.client)[0].version;
-    this.dockerImage = data.dockerImage || Dash.versions(this.client)[0].image;
+    this.createdAt = data.createdAt || this.createdAt;
+    this.updatedAt = data.updatedAt || this.updatedAt;
+    this.remote = data.remote || this.remote;
+    this.remoteDomain = data.remoteDomain || this.remoteDomain;
+    this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
+    const versions = Dash.versions(this.client, this.network);
+    this.version = data.version || versions[0].version;
+    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
+    this.dockerImage = data.dockerImage || versions[0].image;
     if(docker)
       this._docker = docker;
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = Dash.versions(this.client).find(({ version }) => version === this.version);
+    const versionData = Dash.versions(this.client, this.network).find(({ version }) => version === this.version);
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -136,7 +153,7 @@ export class Dash extends Bitcoin {
       '-i',
       '--rm',
       '--memory', this.dockerMem.toString(10) + 'MB',
-      '--cpus', this.dockerCpus.toString(10),
+      '--cpus', this.dockerCPUs.toString(10),
       '--name', this.id,
       '--network', this.dockerNetwork,
       '-p', `${this.rpcPort}:${this.rpcPort}`,

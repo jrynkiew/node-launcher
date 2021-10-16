@@ -1,7 +1,7 @@
 import { Bitcoin } from '../bitcoin/bitcoin';
 import { defaultDockerNetwork, NetworkType, NodeClient, NodeType } from '../../constants';
 import { v4 as uuid } from 'uuid';
-import { generateRandom } from '../../util';
+import { filterVersionsByNetworkType, generateRandom } from '../../util';
 import { CryptoNodeData, VersionDockerImage } from '../../interfaces/crypto-node';
 import { Docker } from '../../util/docker';
 import { ChildProcess } from 'child_process';
@@ -27,25 +27,30 @@ rpcport={{RPC_PORT}}
 
 export class LBRY extends Bitcoin {
 
-  static versions(client = LBRY.clients[0]): VersionDockerImage[] {
+  static versions(client: string, networkType: string): VersionDockerImage[] {
     client = client || LBRY.clients[0];
+    let versions: VersionDockerImage[];
     switch(client) {
       case NodeClient.CORE:
-        return [
+        versions = [
           {
             version: '0.17.3.3',
+            clientVersion: '0.17.3.3',
             image: 'rburgett/lbrycrd:v0.17.3.3',
             dataDir: '/lbry/data',
             walletDir: '/lbry/keys',
             configPath: '/lbry/lbrycrd.conf',
+            networks: [NetworkType.MAINNET, NetworkType.TESTNET],
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` -conf=${this.configPath}` + (data.network === NetworkType.TESTNET ? ' -testnet' : '');
             },
           },
         ];
+        break;
       default:
-        return [];
+        versions = [];
     }
+    return filterVersionsByNetworkType(networkType, versions);
   }
 
   static clients = [
@@ -71,6 +76,10 @@ export class LBRY extends Bitcoin {
     [NetworkType.TESTNET]: 19246,
   };
 
+  static defaultCPUs = 4;
+
+  static defaultMem = 8192;
+
   static generateConfig(client = LBRY.clients[0], network = NetworkType.MAINNET, peerPort = LBRY.defaultPeerPort[NetworkType.MAINNET], rpcPort = LBRY.defaultRPCPort[NetworkType.MAINNET], rpcUsername = generateRandom(), rpcPassword = generateRandom()): string {
     switch(client) {
       case NodeClient.CORE: {
@@ -94,7 +103,8 @@ export class LBRY extends Bitcoin {
   }
 
   id: string;
-  ticker = 'dash';
+  ticker = 'lbc';
+  name = 'LBRY Coin';
   version: string;
   dockerImage: string;
   network: string;
@@ -103,8 +113,8 @@ export class LBRY extends Bitcoin {
   rpcUsername: string;
   rpcPassword: string;
   client: string;
-  dockerCpus = 4;
-  dockerMem = 4096;
+  dockerCPUs = LBRY.defaultCPUs;
+  dockerMem = LBRY.defaultMem;
   dockerNetwork = defaultDockerNetwork;
   dataDir = '';
   walletDir = '';
@@ -119,20 +129,27 @@ export class LBRY extends Bitcoin {
     this.rpcUsername = data.rpcUsername || generateRandom();
     this.rpcPassword = data.rpcPassword || generateRandom();
     this.client = data.client || LBRY.clients[0];
-    this.dockerCpus = data.dockerCpus || this.dockerCpus;
+    this.dockerCPUs = data.dockerCPUs || this.dockerCPUs;
     this.dockerMem = data.dockerMem || this.dockerMem;
     this.dockerNetwork = data.dockerNetwork || this.dockerNetwork;
     this.dataDir = data.dataDir || this.dataDir;
     this.walletDir = data.walletDir || this.dataDir;
     this.configPath = data.configPath || this.configPath;
-    this.version = data.version || LBRY.versions(this.client)[0].version;
-    this.dockerImage = data.dockerImage || LBRY.versions(this.client)[0].image;
+    this.createdAt = data.createdAt || this.createdAt;
+    this.updatedAt = data.updatedAt || this.updatedAt;
+    this.remote = data.remote || this.remote;
+    this.remoteDomain = data.remoteDomain || this.remoteDomain;
+    this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
+    const versions = LBRY.versions(this.client, this.network);
+    this.version = data.version || versions[0].version;
+    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
+    this.dockerImage = data.dockerImage || versions[0].image;
     if(docker)
       this._docker = docker;
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = LBRY.versions(this.client).find(({ version }) => version === this.version);
+    const versionData = LBRY.versions(this.client, this.network).find(({ version }) => version === this.version);
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -144,7 +161,7 @@ export class LBRY extends Bitcoin {
       '-i',
       '--rm',
       '--memory', this.dockerMem.toString(10) + 'MB',
-      '--cpus', this.dockerCpus.toString(10),
+      '--cpus', this.dockerCPUs.toString(10),
       '--name', this.id,
       '--network', this.dockerNetwork,
       '-p', `${this.rpcPort}:${this.rpcPort}`,

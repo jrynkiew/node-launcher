@@ -7,6 +7,7 @@ import { ChildProcess } from 'child_process';
 import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
+import { filterVersionsByNetworkType } from '../../util';
 
 const coreConfig = `
 [parity]
@@ -47,25 +48,30 @@ bootnodes = ["enode://4716883567b5317aad93ea28e707fad0631fb4aa5ac7c5fbd485380b01
 
 export class Xdai extends Ethereum {
 
-  static versions(client = Xdai.clients[0]): VersionDockerImage[] {
+  static versions(client: string, networkType: string): VersionDockerImage[] {
     client = client || Xdai.clients[0];
+    let versions: VersionDockerImage[];
     switch(client) {
       case NodeClient.OPEN_ETHEREUM:
-        return [
+        versions = [
           {
             version: '3.2.6',
+            clientVersion: '3.2.6',
             image: 'rburgett/openethereum:v3.2.6',
             dataDir: '/blockchain/data',
             walletDir: '/blockchain/keys',
             configPath: '/blockchain/config.toml',
+            networks: [NetworkType.MAINNET, NetworkType.TESTNET],
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config=${this.configPath}`;
             },
           },
         ];
+        break;
       default:
-        return [];
+        versions = [];
     }
+    return filterVersionsByNetworkType(networkType, versions);
   }
 
   static clients = [
@@ -88,6 +94,10 @@ export class Xdai extends Ethereum {
     [NetworkType.MAINNET]: 30303,
   };
 
+  static defaultCPUs = 6;
+
+  static defaultMem = 8192;
+
   static generateConfig(client = Xdai.clients[0], network = NetworkType.MAINNET, peerPort = Xdai.defaultPeerPort[NetworkType.MAINNET], rpcPort = Xdai.defaultRPCPort[NetworkType.MAINNET]): string {
     switch(client) {
       case NodeClient.OPEN_ETHEREUM:
@@ -102,6 +112,7 @@ export class Xdai extends Ethereum {
 
   id: string;
   ticker = 'xdai';
+  name = 'xDAI';
   version: string;
   dockerImage: string;
   network: string;
@@ -110,8 +121,8 @@ export class Xdai extends Ethereum {
   rpcUsername: string;
   rpcPassword: string;
   client: string;
-  dockerCpus = 4;
-  dockerMem = 4096;
+  dockerCPUs = Xdai.defaultCPUs;
+  dockerMem = Xdai.defaultMem;
   dockerNetwork = defaultDockerNetwork;
   dataDir = '';
   walletDir = '';
@@ -126,21 +137,27 @@ export class Xdai extends Ethereum {
     this.rpcUsername = data.rpcUsername || '';
     this.rpcPassword = data.rpcPassword || '';
     this.client = data.client || Xdai.clients[0];
-    this.dockerCpus = data.dockerCpus || this.dockerCpus;
+    this.dockerCPUs = data.dockerCPUs || this.dockerCPUs;
     this.dockerMem = data.dockerMem || this.dockerMem;
     this.dockerNetwork = data.dockerNetwork || this.dockerNetwork;
     this.dataDir = data.dataDir || this.dataDir;
     this.walletDir = data.walletDir || this.dataDir;
     this.configPath = data.configPath || this.configPath;
-    const versions = Xdai.versions(this.client);
+    this.createdAt = data.createdAt || this.createdAt;
+    this.updatedAt = data.updatedAt || this.updatedAt;
+    this.remote = data.remote || this.remote;
+    this.remoteDomain = data.remoteDomain || this.remoteDomain;
+    this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
+    const versions = Xdai.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
+    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
     this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = Xdai.versions(this.client).find(({ version }) => version === this.version);
+    const versionData = Xdai.versions(this.client, this.network).find(({ version }) => version === this.version);
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -152,7 +169,7 @@ export class Xdai extends Ethereum {
       '-i',
       '--rm',
       '--memory', this.dockerMem.toString(10) + 'MB',
-      '--cpus', this.dockerCpus.toString(10),
+      '--cpus', this.dockerCPUs.toString(10),
       '--name', this.id,
       '--network', this.dockerNetwork,
       '-p', `${this.rpcPort}:${this.rpcPort}`,

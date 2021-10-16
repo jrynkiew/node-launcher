@@ -3,18 +3,22 @@ import { Docker } from '../util/docker';
 
 export interface VersionDockerImage {
   version: string;
+  clientVersion: string;
   image: string;
   dataDir: string;
   walletDir: string;
   logDir?: string;
   configPath: string;
+  networks: string[],
   generateRuntimeArgs(data: CryptoNodeData): string;
 }
 
 export interface CryptoNodeData {
   id?: string;
   ticker?: string;
+  name?: string;
   version?: string;
+  clientVersion?: string;
   dockerImage?: string;
   network?: string;
   peerPort?: number;
@@ -23,7 +27,7 @@ export interface CryptoNodeData {
   rpcUsername?: string;
   rpcPassword?: string;
   client?: string;
-  dockerCpus?: number;
+  dockerCPUs?: number;
   dockerMem?: number;
   dockerNetwork?: string;
   dataDir?: string;
@@ -31,6 +35,12 @@ export interface CryptoNodeData {
   configPath?: string;
   domain?: string;
   address?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  remote?: boolean;
+  remoteDomain?: string;
+  remoteProtocol?: string;
+  remotePort?: number;
 }
 
 export interface CryptoNode {
@@ -44,8 +54,9 @@ export interface CryptoNode {
   stop(): void;
   toObject(): CryptoNodeData;
   generateConfig(): string;
+  endpoint(): string;
   rpcGetVersion(): Promise<string>;
-  rpcGetBlockCount(): Promise<number>;
+  rpcGetBlockCount(): Promise<string>;
   getCPUUsage(): Promise<string>;
   getMemUsage(): Promise<[usagePercent: string, used: string, allocated: string]>;
   getStartTime(): Promise<string>;
@@ -53,13 +64,15 @@ export interface CryptoNode {
 }
 
 export abstract class CryptoNodeStatic {
-  static versions: VersionDockerImage[];
   static nodeTypes: string[];
   static networkTypes: string[];
   static defaultPeerPort: any;
   static defaultRPCPort: any;
   static defaultCPUs: number;
   static defaultMem: number;
+  static versions(client: string, network: string): VersionDockerImage[] {
+    return [];
+  }
   static generateConfig(client: string, network: string, peerPort: number, rpcPort: number, rpcUsername: string, rpcPassword: string): string {
     return '';
   }

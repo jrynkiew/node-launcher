@@ -7,6 +7,7 @@ import { ChildProcess } from 'child_process';
 import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
+import { filterVersionsByNetworkType } from '../../util';
 
 const coreConfig = `
 [parity]
@@ -31,25 +32,30 @@ reserved_peers="/home/parity/.local/share/io.parity.ethereum/bootnodes.txt"
 
 export class Fuse extends Ethereum {
 
-  static versions(client = Fuse.clients[0]): VersionDockerImage[] {
+  static versions(client: string, networkType: string): VersionDockerImage[] {
     client = client || Fuse.clients[0];
+    let versions: VersionDockerImage[];
     switch(client) {
       case NodeClient.PARITY:
-        return [
+        versions = [
           {
             version: '2.5.13',
+            clientVersion: '2.5.13',
             image: 'fusenet/node:1.0.0',
             dataDir: '/root/data',
             walletDir: '/root/keystore',
             configPath: '/root/config.toml',
+            networks: [NetworkType.MAINNET],
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config=${this.configPath}`;
             },
           },
         ];
+        break;
       default:
-        return [];
+        versions = [];
     }
+    return filterVersionsByNetworkType(networkType, versions);
   }
 
   static clients = [
@@ -72,6 +78,10 @@ export class Fuse extends Ethereum {
     [NetworkType.MAINNET]: 30300,
   };
 
+  static defaultCPUs = 6;
+
+  static defaultMem = 8192;
+
   static generateConfig(client = Fuse.clients[0], network = NetworkType.MAINNET, peerPort = Fuse.defaultPeerPort[NetworkType.MAINNET], rpcPort = Fuse.defaultRPCPort[NetworkType.MAINNET]): string {
     switch(client) {
       case NodeClient.PARITY:
@@ -86,6 +96,7 @@ export class Fuse extends Ethereum {
 
   id: string;
   ticker = 'fuse';
+  name = 'Fuse';
   version: string;
   dockerImage: string;
   network: string;
@@ -94,8 +105,8 @@ export class Fuse extends Ethereum {
   rpcUsername: string;
   rpcPassword: string;
   client: string;
-  dockerCpus = 4;
-  dockerMem = 4096;
+  dockerCPUs = Fuse.defaultCPUs;
+  dockerMem = Fuse.defaultMem;
   dockerNetwork = defaultDockerNetwork;
   dataDir = '';
   walletDir = '';
@@ -110,21 +121,27 @@ export class Fuse extends Ethereum {
     this.rpcUsername = data.rpcUsername || '';
     this.rpcPassword = data.rpcPassword || '';
     this.client = data.client || Fuse.clients[0];
-    this.dockerCpus = data.dockerCpus || this.dockerCpus;
+    this.dockerCPUs = data.dockerCPUs || this.dockerCPUs;
     this.dockerMem = data.dockerMem || this.dockerMem;
     this.dockerNetwork = data.dockerNetwork || this.dockerNetwork;
     this.dataDir = data.dataDir || this.dataDir;
     this.walletDir = data.walletDir || this.dataDir;
     this.configPath = data.configPath || this.configPath;
-    const versions = Fuse.versions(this.client);
+    this.createdAt = data.createdAt || this.createdAt;
+    this.updatedAt = data.updatedAt || this.updatedAt;
+    this.remote = data.remote || this.remote;
+    this.remoteDomain = data.remoteDomain || this.remoteDomain;
+    this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
+    const versions = Fuse.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
+    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
     this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = Fuse.versions(this.client).find(({ version }) => version === this.version);
+    const versionData = Fuse.versions(this.client, this.network).find(({ version }) => version === this.version);
     if(!versionData)
       throw new Error(`Unknown ${this.ticker} version ${this.version}`);
     const {
@@ -136,7 +153,7 @@ export class Fuse extends Ethereum {
       '-i',
       '--rm',
       '--memory', this.dockerMem.toString(10) + 'MB',
-      '--cpus', this.dockerCpus.toString(10),
+      '--cpus', this.dockerCPUs.toString(10),
       '--name', this.id,
       '--network', this.dockerNetwork,
       '-p', `${this.rpcPort}:${this.rpcPort}`,

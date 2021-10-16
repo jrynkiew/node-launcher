@@ -1,6 +1,6 @@
 import { CryptoNodeData, VersionDockerImage } from '../../interfaces/crypto-node';
 import { defaultDockerNetwork, NetworkType, NodeClient, NodeType } from '../../constants';
-import { generateRandom } from '../../util';
+import { filterVersionsByNetworkType, generateRandom } from '../../util';
 import { Docker } from '../../util/docker';
 import { ChildProcess } from 'child_process';
 import { v4 as uuid} from 'uuid';
@@ -30,37 +30,44 @@ const coreConfig = `
 
 export class Avalanche extends Bitcoin {
 
-  static versions(client = Avalanche.clients[0]): VersionDockerImage[] {
+  static versions(client: string, networkType: string): VersionDockerImage[] {
     client = client || Avalanche.clients[0];
+    let versions: VersionDockerImage[];
     switch(client) {
       case NodeClient.CORE:
-        return [
+        versions = [
           {
             version: '1.5.3',
+            clientVersion: '1.5.3',
             image: 'avaplatform/avalanchego:v1.5.3',
             dataDir: '/root/db',
             walletDir: '/root/keystore',
             logDir: '/root/logs',
             configPath: '/root/config.json',
+            networks: [NetworkType.MAINNET],
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config-file=${this.configPath}`;
             },
           },
           {
             version: '1.4.9',
+            clientVersion: '1.4.9',
             image: 'avaplatform/avalanchego:v1.4.9',
             dataDir: '/root/db',
             walletDir: '/root/keystore',
             logDir: '/root/logs',
             configPath: '/root/config.json',
+            networks: [NetworkType.MAINNET],
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config-file=${this.configPath}`;
             },
           },
         ];
+        break;
       default:
-        return [];
+        versions = [];
     }
+    return filterVersionsByNetworkType(networkType, versions);
   }
 
   static clients = [
@@ -83,9 +90,9 @@ export class Avalanche extends Bitcoin {
     [NetworkType.MAINNET]: 9651,
   };
 
-  static defaultCPUs = 4;
+  static defaultCPUs = 8;
 
-  static defaultMem = 8192;
+  static defaultMem = 16384;
 
   static generateConfig(client = Avalanche.clients[0], network = NetworkType.MAINNET, peerPort = Avalanche.defaultPeerPort[NetworkType.MAINNET], rpcPort = Avalanche.defaultRPCPort[NetworkType.MAINNET]): string {
     switch(client) {
@@ -109,8 +116,8 @@ export class Avalanche extends Bitcoin {
   rpcUsername: string;
   rpcPassword: string;
   client: string;
-  dockerCpus: number;
-  dockerMem: number;
+  dockerCPUs = Avalanche.defaultCPUs;
+  dockerMem = Avalanche.defaultMem;
   dockerNetwork = defaultDockerNetwork;
   dataDir = '';
   walletDir = '';
@@ -125,21 +132,25 @@ export class Avalanche extends Bitcoin {
     this.rpcUsername = data.rpcUsername || '';
     this.rpcPassword = data.rpcPassword || '';
     this.client = data.client || Avalanche.clients[0];
-    this.dockerCpus = data.dockerCpus || Avalanche.defaultCPUs;
-    this.dockerMem = data.dockerMem || Avalanche.defaultMem;
+    this.dockerCPUs = data.dockerCPUs || this.dockerCPUs;
+    this.dockerMem = data.dockerMem || this.dockerMem;
     this.dockerNetwork = data.dockerNetwork || this.dockerNetwork;
     this.dataDir = data.dataDir || this.dataDir;
     this.walletDir = data.walletDir || this.dataDir;
     this.configPath = data.configPath || this.configPath;
-    const versions = Avalanche.versions(this.client);
+    this.remote = data.remote || this.remote;
+    this.remoteDomain = data.remoteDomain || this.remoteDomain;
+    this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
+    const versions = Avalanche.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
+    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
     this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
   }
 
   async start(onOutput?: (output: string)=>void, onError?: (err: Error)=>void): Promise<ChildProcess> {
-    const versionData = Avalanche.versions(this.client).find(({ version }) => version === this.version);
+    const versionData = Avalanche.versions(this.client, this.network).find(({ version }) => version === this.version);
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -152,7 +163,7 @@ export class Avalanche extends Bitcoin {
       '-i',
       '--rm',
       '--memory', this.dockerMem.toString(10) + 'MB',
-      '--cpus', this.dockerCpus.toString(10),
+      '--cpus', this.dockerCPUs.toString(10),
       '--name', this.id,
       '--network', this.dockerNetwork,
       '-p', `${this.rpcPort}:${this.rpcPort}`,
@@ -199,11 +210,10 @@ export class Avalanche extends Bitcoin {
   }
 
   async rpcGetVersion(): Promise<string> {
-    if(!this._instance)
-      throw new Error('Instance must be running before you can call rpcGetVersion()');
     try {
+      this._runCheck('rpcGetVersion');
       const { body } = await request
-        .post(`http://localhost:${this.rpcPort}/ext/info`)
+        .post(`${this.endpoint()}/ext/info`)
         .set('Accept', 'application/json')
         .auth(this.rpcUsername, this.rpcPassword)
         .timeout(this._requestTimeout)
@@ -230,7 +240,7 @@ export class Avalanche extends Bitcoin {
   async isBootstrapped(chain: string): Promise<boolean> {
     try {
       const res = await request
-        .post(`http://127.0.0.1:${this.rpcPort}/ext/info`)
+        .post(`${this.endpoint()}/ext/info`)
         .set('Accept', 'application/json')
         .timeout(this._requestTimeout)
         .send({
@@ -252,8 +262,9 @@ export class Avalanche extends Bitcoin {
     }
   }
 
-  async rpcGetBlockCount(): Promise<number> {
+  async rpcGetBlockCount(): Promise<string> {
     try {
+      this._runCheck('rpcGetBlockCount');
       const [ p, c, x ] = await Promise.all([
         this.isBootstrapped('P'),
         this.isBootstrapped('X'),
@@ -261,13 +272,14 @@ export class Avalanche extends Bitcoin {
       ]);
       if(!p || !c || !x) {
         const { text = '' } = await request
-          .post(`http://127.0.0.1:${this.rpcPort}/ext/metrics`)
+          .post(`${this.endpoint()}/ext/metrics`)
           .timeout(this._requestTimeout);
         const splitText = text
           .split('\n')
           .map(s => s.trim())
           .filter(s => s);
-        const [ pCount, cCount, xCount ] = ['avalanche_P_bs_fetched', 'avalanche_C_bs_fetched', 'avalanche_X_bs_fetched_vts']
+        // const [ pCount, cCount, xCount ] = ['avalanche_P_bs_fetched', 'avalanche_C_bs_fetched', 'avalanche_X_bs_fetched_vts']
+        const countArr = ['avalanche_P_bs_fetched', 'avalanche_C_bs_fetched', 'avalanche_X_bs_fetched_vts']
           .map(key => {
             let count = 0;
             const patt = new RegExp(`^${key}.+?(\\d+)$`);
@@ -280,8 +292,8 @@ export class Avalanche extends Bitcoin {
             }
             return count;
           });
-        console.log(pCount, cCount, xCount);
-        return 0;
+        // console.log(pCount, cCount, xCount);
+        return [countArr].map(count => String(count)).join(',');
       } else {
         console.log(p, c, x);
         // const res = await request
@@ -297,9 +309,9 @@ export class Avalanche extends Bitcoin {
         //     },
         //   });
         // console.log(res.body);
-        return 0;
+        return '0';
         const res1 = await request
-          .post(`http://127.0.0.1:${this.rpcPort}/ext/bc/C/rpc`)
+          .post(`${this.endpoint()}/ext/bc/C/rpc`)
           .set('Accept', 'application/json')
           .timeout(this._requestTimeout)
           .send({
@@ -310,17 +322,17 @@ export class Avalanche extends Bitcoin {
           });
         console.log('res1', res1);
         if(res1.body.result === false) {
-          return 0;
+          return '0';
         } else {
           const { currentBlock } = res1.body.result;
           const blockNum = parseInt(currentBlock, 16);
-          return blockNum > 0 ? blockNum : 0;
+          return blockNum > 0 ? String(blockNum) : '0';
         }
       }
     } catch(err) {
       console.error(err);
       this._logError(err);
-      return 0;
+      return '0';
     }
   }
 

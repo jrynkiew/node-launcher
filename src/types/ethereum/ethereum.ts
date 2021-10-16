@@ -8,6 +8,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import os from 'os';
 import { Bitcoin } from '../bitcoin/bitcoin';
+import { filterVersionsByNetworkType } from '../../util';
 
 const coreConfig = `
 [Eth]
@@ -28,26 +29,31 @@ ListenAddr = ":{{PEER_PORT}}"
 
 export class Ethereum extends Bitcoin {
 
-  static versions(client = Ethereum.clients[0]): VersionDockerImage[] {
+  static versions(client: string, networkType: string): VersionDockerImage[] {
     client = client || Ethereum.clients[0];
+    let versions: VersionDockerImage[];
     switch(client) {
       case NodeClient.GETH:
-        return [
+        versions = [
           {
             version: '1.10.3',
+            clientVersion: '1.10.3',
             image: 'ethereum/client-go:v1.10.3',
             dataDir: '/root/.ethereum',
             walletDir: '/root/keystore',
             configPath: '/root/config.toml',
+            networks: [NetworkType.MAINNET, NetworkType.RINKEBY],
             generateRuntimeArgs(data: CryptoNodeData): string {
               const { network = '' } = data;
               return ` --config=${this.configPath}` + (network === NetworkType.MAINNET ? '' : ` -${network.toLowerCase()}`);
             },
           },
         ];
+        break;
       default:
-        return [];
+        versions = [];
     }
+    return filterVersionsByNetworkType(networkType, versions);
   }
 
   static clients = [
@@ -74,9 +80,9 @@ export class Ethereum extends Bitcoin {
     [NetworkType.RINKEBY]: 18546,
   };
 
-  static defaultCPUs = 4;
+  static defaultCPUs = 8;
 
-  static defaultMem = 4096;
+  static defaultMem = 16384;
 
   static generateConfig(client = Ethereum.clients[0], network = NetworkType.MAINNET, peerPort = Ethereum.defaultPeerPort[NetworkType.MAINNET], rpcPort = Ethereum.defaultRPCPort[NetworkType.MAINNET]): string {
     switch(client) {
@@ -92,6 +98,7 @@ export class Ethereum extends Bitcoin {
 
   id: string;
   ticker = 'eth';
+  name = 'Ethereum';
   version: string;
   dockerImage: string;
   network: string;
@@ -100,8 +107,8 @@ export class Ethereum extends Bitcoin {
   rpcUsername: string;
   rpcPassword: string;
   client: string;
-  dockerCpus = 4;
-  dockerMem = 4096;
+  dockerCPUs = Ethereum.defaultCPUs;
+  dockerMem = Ethereum.defaultMem;
   dockerNetwork = defaultDockerNetwork;
   dataDir = '';
   walletDir = '';
@@ -116,21 +123,27 @@ export class Ethereum extends Bitcoin {
     this.rpcUsername = data.rpcUsername || '';
     this.rpcPassword = data.rpcPassword || '';
     this.client = data.client || Ethereum.clients[0];
-    this.dockerCpus = data.dockerCpus || this.dockerCpus;
+    this.dockerCPUs = data.dockerCPUs || this.dockerCPUs;
     this.dockerMem = data.dockerMem || this.dockerMem;
     this.dockerNetwork = data.dockerNetwork || this.dockerNetwork;
     this.dataDir = data.dataDir || this.dataDir;
     this.walletDir = data.walletDir || this.dataDir;
     this.configPath = data.configPath || this.configPath;
-    const versions = Ethereum.versions(this.client);
+    this.createdAt = data.createdAt || this.createdAt;
+    this.updatedAt = data.updatedAt || this.updatedAt;
+    this.remote = data.remote || this.remote;
+    this.remoteDomain = data.remoteDomain || this.remoteDomain;
+    this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
+    const versions = Ethereum.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
+    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
     this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = Ethereum.versions(this.client).find(({ version }) => version === this.version);
+    const versionData = Ethereum.versions(this.client, this.network).find(({ version }) => version === this.version);
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -142,7 +155,7 @@ export class Ethereum extends Bitcoin {
       '-i',
       '--rm',
       '--memory', this.dockerMem.toString(10) + 'MB',
-      '--cpus', this.dockerCpus.toString(10),
+      '--cpus', this.dockerCPUs.toString(10),
       '--name', this.id,
       '--network', this.dockerNetwork,
       '-p', `${this.rpcPort}:${this.rpcPort}`,
@@ -184,11 +197,10 @@ export class Ethereum extends Bitcoin {
   }
 
   async rpcGetVersion(): Promise<string> {
-    if(!this._instance)
-      throw new Error('Instance must be running before you can call rpcGetVersion()');
     try {
+      this._runCheck('rpcGetVersion');
       const { body } = await request
-        .post(`http://localhost:${this.rpcPort}/`)
+        .post(this.endpoint())
         .set('Accept', 'application/json')
         .auth(this.rpcUsername, this.rpcPassword)
         .timeout(this._requestTimeout)
@@ -211,10 +223,11 @@ export class Ethereum extends Bitcoin {
     }
   }
 
-  async rpcGetBlockCount(): Promise<number> {
+  async rpcGetBlockCount(): Promise<string> {
     try {
+      this._runCheck('rpcGetBlockCount');
       const res = await request
-        .post(`http://localhost:${this.rpcPort}/`)
+        .post(this.endpoint())
         .set('Accept', 'application/json')
         .timeout(this._requestTimeout)
         .send({
@@ -224,15 +237,15 @@ export class Ethereum extends Bitcoin {
           params: [],
         });
       if(res.body.result === false) {
-        return 0;
+        return '0';
       } else {
         const { currentBlock } = res.body.result;
         const blockNum = parseInt(currentBlock, 16);
-        return blockNum > 0 ? blockNum : 0;
+        return blockNum > 0 ? String(blockNum) : '0';
       }
     } catch(err) {
       this._logError(err);
-      return 0;
+      return '0';
     }
   }
 

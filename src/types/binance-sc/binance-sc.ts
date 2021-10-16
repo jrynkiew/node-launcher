@@ -7,6 +7,7 @@ import { ChildProcess } from 'child_process';
 import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
+import { filterVersionsByNetworkType } from '../../util';
 
 const coreConfig = `
 [Eth]
@@ -69,25 +70,30 @@ IdleTimeout = 120000000000
 
 export class BinanceSC extends Ethereum {
 
-  static versions(client = BinanceSC.clients[0]): VersionDockerImage[] {
+  static versions(client: string, networkType: string): VersionDockerImage[] {
     client = client || BinanceSC.clients[0];
+    let versions: VersionDockerImage[];
     switch(client) {
       case NodeClient.GETH:
-        return [
+        versions = [
           {
             version: '1.1.0',
+            clientVersion: '1.1.0',
             image: 'rburgett/bsc_geth:v1.1.0-beta',
             dataDir: '/blockchain/data',
             walletDir: '/blockchain/keys',
             configPath: '/blockchain/config.toml',
+            networks: [NetworkType.MAINNET],
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config=${this.configPath}`;
             },
           },
         ];
+        break;
       default:
-        return [];
+        versions = [];
     }
+    return filterVersionsByNetworkType(networkType, versions);
   }
 
   static clients = [
@@ -109,6 +115,10 @@ export class BinanceSC extends Ethereum {
   static defaultPeerPort = {
     [NetworkType.MAINNET]: 8546,
   };
+
+  static defaultCPUs = 8;
+
+  static defaultMem = 32768;
 
   static generateConfig(client = BinanceSC.clients[0], network = NetworkType.MAINNET, peerPort = BinanceSC.defaultPeerPort[NetworkType.MAINNET], rpcPort = BinanceSC.defaultRPCPort[NetworkType.MAINNET]): string {
     switch(client) {
@@ -132,7 +142,8 @@ export class BinanceSC extends Ethereum {
   }
 
   id: string;
-  ticker = 'xdai';
+  ticker = 'bsc';
+  name = 'Binance Smart Chain';
   version: string;
   dockerImage: string;
   network: string;
@@ -141,8 +152,8 @@ export class BinanceSC extends Ethereum {
   rpcUsername: string;
   rpcPassword: string;
   client: string;
-  dockerCpus = 8;
-  dockerMem = 16384;
+  dockerCPUs = BinanceSC.defaultCPUs;
+  dockerMem = BinanceSC.defaultMem;
   dockerNetwork = defaultDockerNetwork;
   dataDir = '';
   walletDir = '';
@@ -157,21 +168,27 @@ export class BinanceSC extends Ethereum {
     this.rpcUsername = data.rpcUsername || '';
     this.rpcPassword = data.rpcPassword || '';
     this.client = data.client || BinanceSC.clients[0];
-    this.dockerCpus = data.dockerCpus || this.dockerCpus;
+    this.dockerCPUs = data.dockerCPUs || this.dockerCPUs;
     this.dockerMem = data.dockerMem || this.dockerMem;
     this.dockerNetwork = data.dockerNetwork || this.dockerNetwork;
     this.dataDir = data.dataDir || this.dataDir;
     this.walletDir = data.walletDir || this.dataDir;
     this.configPath = data.configPath || this.configPath;
-    const versions = BinanceSC.versions(this.client);
+    this.createdAt = data.createdAt || this.createdAt;
+    this.updatedAt = data.updatedAt || this.updatedAt;
+    this.remote = data.remote || this.remote;
+    this.remoteDomain = data.remoteDomain || this.remoteDomain;
+    this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
+    const versions = BinanceSC.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
+    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
     this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = BinanceSC.versions(this.client).find(({ version }) => version === this.version);
+    const versionData = BinanceSC.versions(this.client, this.network).find(({ version }) => version === this.version);
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -183,7 +200,7 @@ export class BinanceSC extends Ethereum {
       '-i',
       '--rm',
       '--memory', this.dockerMem.toString(10) + 'MB',
-      '--cpus', this.dockerCpus.toString(10),
+      '--cpus', this.dockerCPUs.toString(10),
       '--name', this.id,
       '--network', this.dockerNetwork,
       '-p', `${this.rpcPort}:${this.rpcPort}`,

@@ -9,6 +9,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import { PocketGenesis } from './genesis';
 import request from 'superagent';
+import { filterVersionsByNetworkType } from '../../util';
 
 const coreConfig = `
 {
@@ -171,26 +172,44 @@ const coreConfig = `
 
 export class Pocket extends Bitcoin {
 
-  static versions(client = Pocket.clients[0]): VersionDockerImage[] {
+  static versions(client: string, networkType: string): VersionDockerImage[] {
     client = client || Pocket.clients[0];
+    let versions: VersionDockerImage[];
     switch(client) {
       case NodeClient.CORE:
-        return [
+        versions = [
+          {
+            version: 'RC-0.6.3.7',
+            clientVersion: 'RC-0.6.3.7',
+            image: 'rburgett/pocketcore:RC-0.6.3.7',
+            dataDir: '/root/.pocket',
+            walletDir: '/root/pocket-keys',
+            configPath: '',
+            networks: [NetworkType.MAINNET, NetworkType.TESTNET],
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              const { network = '' } = data;
+              return ` start --${network.toLowerCase()}`;
+            },
+          },
           {
             version: 'RC-0.6.3.6',
+            clientVersion: 'RC-0.6.3.6',
             image: 'rburgett/pocketcore:RC-0.6.3.6',
             dataDir: '/root/.pocket',
             walletDir: '/root/pocket-keys',
             configPath: '',
+            networks: [NetworkType.MAINNET, NetworkType.TESTNET],
             generateRuntimeArgs(data: CryptoNodeData): string {
               const { network = '' } = data;
               return ` start --${network.toLowerCase()}`;
             },
           },
         ];
+        break;
       default:
-        return [];
+        versions = [];
     }
+    return filterVersionsByNetworkType(networkType, versions);
   }
 
   static clients = [
@@ -244,6 +263,7 @@ export class Pocket extends Bitcoin {
 
   id: string;
   ticker = 'pokt';
+  name = 'Pocket';
   version: string;
   dockerImage: string;
   network: string;
@@ -253,8 +273,8 @@ export class Pocket extends Bitcoin {
   rpcUsername: string;
   rpcPassword: string;
   client: string;
-  dockerCpus: number;
-  dockerMem: number;
+  dockerCPUs = Pocket.defaultCPUs;
+  dockerMem = Pocket.defaultMem;
   dockerNetwork = defaultDockerNetwork;
   dataDir = '';
   walletDir = '';
@@ -272,14 +292,20 @@ export class Pocket extends Bitcoin {
     this.rpcPassword = data.rpcPassword || '';
 
     this.client = data.client || Pocket.clients[0];
-    this.dockerCpus = data.dockerCpus || Pocket.defaultCPUs;
-    this.dockerMem = data.dockerMem || Pocket.defaultMem;
+    this.dockerCPUs = data.dockerCPUs || this.dockerCPUs;
+    this.dockerMem = data.dockerMem || this.dockerMem;
     this.dockerNetwork = data.dockerNetwork || this.dockerNetwork;
     this.dataDir = data.dataDir || this.dataDir;
     this.walletDir = data.walletDir || this.dataDir;
     this.configPath = data.configPath || this.configPath;
-    const versions = Pocket.versions(this.client);
+    this.createdAt = data.createdAt || this.createdAt;
+    this.updatedAt = data.updatedAt || this.updatedAt;
+    this.remote = data.remote || this.remote;
+    this.remoteDomain = data.remoteDomain || this.remoteDomain;
+    this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
+    const versions = Pocket.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
+    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
     this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     this.domain = data.domain || this.domain;
     this.address = data.address || this.address;
@@ -291,7 +317,7 @@ export class Pocket extends Bitcoin {
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = Pocket.versions(this.client).find(({ version }) => version === this.version);
+    const versionData = Pocket.versions(this.client, this.network).find(({ version }) => version === this.version);
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -353,7 +379,7 @@ export class Pocket extends Bitcoin {
       '-i',
       '--rm',
       '--memory', this.dockerMem.toString(10) + 'MB',
-      '--cpus', this.dockerCpus.toString(10),
+      '--cpus', this.dockerCPUs.toString(10),
       '--name', this.id,
       '--network', this.dockerNetwork,
       '-p', `${this.rpcPort}:${this.rpcPort}`,
@@ -382,11 +408,10 @@ export class Pocket extends Bitcoin {
   }
 
   async rpcGetVersion(): Promise<string> {
-    if(!this._instance)
-      throw new Error('Instance must be running before you can call rpcGetVersion()');
     try {
+      this._runCheck('rpcGetVersion');
       const { body: version = '' } = await request
-        .get(`http://localhost:${this.rpcPort}/v1`)
+        .get(`${this.endpoint()}/v1`)
         .timeout(this._requestTimeout);
       return version;
     } catch(err) {
@@ -395,16 +420,17 @@ export class Pocket extends Bitcoin {
     }
   }
 
-  async rpcGetBlockCount(): Promise<number> {
+  async rpcGetBlockCount(): Promise<string> {
     try {
+      this._runCheck('rpcGetBlockCount');
       const { body = {} } = await request
-        .post(`http://localhost:${this.rpcPort}/v1/query/height`)
+        .post(`${this.endpoint()}/v1/query/height`)
         .timeout(this._requestTimeout)
         .set('Accept', 'application/json');
-      return body.height || 0;
+      return String(body.height) || '0';
     } catch(err) {
       this._logError(err);
-      return 0;
+      return '0';
     }
   }
 
