@@ -1,5 +1,5 @@
 import { CryptoNodeData, VersionDockerImage } from '../../interfaces/crypto-node';
-import { defaultDockerNetwork, NetworkType, NodeClient, NodeType } from '../../constants';
+import { defaultDockerNetwork, NetworkType, NodeClient, NodeType, Status } from '../../constants';
 import { Docker } from '../../util/docker';
 import { ChildProcess } from 'child_process';
 import { v4 as uuid} from 'uuid';
@@ -35,6 +35,19 @@ export class Ethereum extends Bitcoin {
     switch(client) {
       case NodeClient.GETH:
         versions = [
+          {
+            version: '1.10.10',
+            clientVersion: '1.10.10',
+            image: 'ethereum/client-go:v1.10.10',
+            dataDir: '/root/.ethereum',
+            walletDir: '/root/keystore',
+            configPath: '/root/config.toml',
+            networks: [NetworkType.MAINNET, NetworkType.RINKEBY],
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              const { network = '' } = data;
+              return ` --config=${this.configPath}` + (network === NetworkType.MAINNET ? '' : ` -${network.toLowerCase()}`);
+            },
+          },
           {
             version: '1.10.3',
             clientVersion: '1.10.3',
@@ -100,6 +113,8 @@ export class Ethereum extends Bitcoin {
   ticker = 'eth';
   name = 'Ethereum';
   version: string;
+  clientVersion: string;
+  archival = false;
   dockerImage: string;
   network: string;
   peerPort: number;
@@ -113,6 +128,9 @@ export class Ethereum extends Bitcoin {
   dataDir = '';
   walletDir = '';
   configPath = '';
+  remote = false;
+  remoteDomain = '';
+  remoteProtocol = '';
 
   constructor(data: CryptoNodeData, docker?: Docker) {
     super(data, docker);
@@ -137,6 +155,7 @@ export class Ethereum extends Bitcoin {
     const versions = Ethereum.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
     this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
+    this.archival = data.archival || this.archival;
     this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
@@ -211,7 +230,11 @@ export class Ethereum extends Bitcoin {
           params: [],
         });
       const { result = '' } = body;
-      const matches = result.match(/v(\d+\.\d+\.\d+)/);
+      // first, check for RC matches
+      let matches = result.match(/v(\d+\.\d+\.\d+-rc.+?)-/i);
+      if(!matches)
+        // check for regular matches
+        matches = result.match(/v(\d+\.\d+\.\d+)/);
       if(matches && matches.length > 1) {
         return matches[1];
       } else {
@@ -224,6 +247,7 @@ export class Ethereum extends Bitcoin {
   }
 
   async rpcGetBlockCount(): Promise<string> {
+    let blockHeight;
     try {
       this._runCheck('rpcGetBlockCount');
       const res = await request
@@ -237,16 +261,65 @@ export class Ethereum extends Bitcoin {
           params: [],
         });
       if(res.body.result === false) {
-        return '0';
+        const res = await request
+          .post(this.endpoint())
+          .set('Accept', 'application/json')
+          .timeout(this._requestTimeout)
+          .send({
+            id: '',
+            jsonrpc: '2.0',
+            method: 'eth_blockNumber',
+            params: [],
+          });
+        const currentBlock = res.body.result;
+        const blockNum = parseInt(currentBlock, 16);
+        blockHeight = blockNum > 0 ? blockNum.toString(10) : '';
       } else {
         const { currentBlock } = res.body.result;
         const blockNum = parseInt(currentBlock, 16);
-        return blockNum > 0 ? String(blockNum) : '0';
+        blockHeight = blockNum > 0 ? blockNum.toString(10) : '';
       }
     } catch(err) {
       this._logError(err);
-      return '0';
+      blockHeight = '';
     }
+    return blockHeight || '';
+  }
+
+  async getStatus(): Promise<string> {
+    let status;
+    try {
+      if(this.remote) {
+        const version = await this.rpcGetVersion();
+        status = version ? Status.RUNNING : Status.STOPPED;
+      } else {
+        const stats = await this._docker.containerInspect(this.id);
+        status = stats.State.Running ? Status.RUNNING : Status.STOPPED;
+      }
+    } catch(err) {
+      status = Status.STOPPED;
+    }
+
+    if(status !== Status.STOPPED) {
+      try {
+        const res = await request
+          .post(this.endpoint())
+          .set('Accept', 'application/json')
+          .timeout(this._requestTimeout)
+          .send({
+            id: '',
+            jsonrpc: '2.0',
+            method: 'eth_syncing',
+            params: [],
+          });
+        if(res.body.result !== false)
+          status = Status.SYNCING;
+      } catch(err) {
+        // do nothing with the error
+      }
+    }
+
+    return status;
   }
 
 }

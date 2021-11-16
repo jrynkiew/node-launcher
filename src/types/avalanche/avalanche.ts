@@ -1,5 +1,5 @@
 import { CryptoNodeData, VersionDockerImage } from '../../interfaces/crypto-node';
-import { defaultDockerNetwork, NetworkType, NodeClient, NodeType } from '../../constants';
+import { defaultDockerNetwork, NetworkType, NodeClient, NodeType, Status } from '../../constants';
 import { filterVersionsByNetworkType, generateRandom } from '../../util';
 import { Docker } from '../../util/docker';
 import { ChildProcess } from 'child_process';
@@ -36,6 +36,32 @@ export class Avalanche extends Bitcoin {
     switch(client) {
       case NodeClient.CORE:
         versions = [
+          {
+            version: '1.6.5',
+            clientVersion: '1.6.5',
+            image: 'avaplatform/avalanchego:v1.6.5',
+            dataDir: '/root/db',
+            walletDir: '/root/keystore',
+            logDir: '/root/logs',
+            configPath: '/root/config.json',
+            networks: [NetworkType.MAINNET],
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              return ` --config-file=${this.configPath}`;
+            },
+          },
+          {
+            version: '1.6.3',
+            clientVersion: '1.6.3',
+            image: 'avaplatform/avalanchego:v1.6.3',
+            dataDir: '/root/db',
+            walletDir: '/root/keystore',
+            logDir: '/root/logs',
+            configPath: '/root/config.json',
+            networks: [NetworkType.MAINNET],
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              return ` --config-file=${this.configPath}`;
+            },
+          },
           {
             version: '1.5.3',
             clientVersion: '1.5.3',
@@ -109,6 +135,8 @@ export class Avalanche extends Bitcoin {
   id: string;
   ticker = 'avax';
   version: string;
+  clientVersion: string;
+  archival = false;
   dockerImage: string;
   network: string;
   peerPort: number;
@@ -144,12 +172,13 @@ export class Avalanche extends Bitcoin {
     const versions = Avalanche.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
     this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
+    this.archival = data.archival || this.archival;
     this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
   }
 
-  async start(onOutput?: (output: string)=>void, onError?: (err: Error)=>void): Promise<ChildProcess> {
+  async start(): Promise<ChildProcess> {
     const versionData = Avalanche.versions(this.client, this.network).find(({ version }) => version === this.version);
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
@@ -194,8 +223,9 @@ export class Avalanche extends Bitcoin {
     const instance = this._docker.run(
       this.dockerImage + versionData.generateRuntimeArgs(this),
       args,
-      onOutput ? onOutput : ()=>{},
-      onError ? onError : ()=>{},
+      output => this._logOutput(output),
+      err => this._logError(err),
+      code => this._logClose(code),
     );
     this._instance = instance;
     return instance;
@@ -232,6 +262,7 @@ export class Avalanche extends Bitcoin {
         return '';
       }
     } catch(err) {
+      console.log(err.message + '\n' + err.stack);
       this._logError(err);
       return '';
     }
@@ -262,6 +293,52 @@ export class Avalanche extends Bitcoin {
     }
   }
 
+  async getPHeight(): Promise<string> {
+    try {
+      const res = await request
+        .post(`${this.endpoint()}/ext/P`)
+        .set('Accept', 'application/json')
+        .timeout(this._requestTimeout)
+        .send({
+          jsonrpc: '2.0',
+          method: 'platform.getHeight',
+          params: {},
+        });
+      const { height = '0' } = res.body.result;
+      return Number(height) > 0 ? height : '';
+    } catch(err) {
+      this._logError(err);
+      console.error(err);
+      return '';
+    }
+  }
+
+  async getXHeight(): Promise<string> {
+    return '';
+  }
+
+  async getCHeight(): Promise<string> {
+    try {
+      const res = await request
+        .post(`${this.endpoint()}/etc/bc/C/rpc`)
+        .set('Accept', 'application/json')
+        .timeout(this._requestTimeout)
+        .send({
+          id: '',
+          jsonrpc: '2.0',
+          method: 'eth_blockNumber',
+          params: [],
+        });
+      const currentBlock = res.body.result;
+      const blockNum = parseInt(currentBlock, 16);
+      return blockNum > 0 ? blockNum.toString(10) : '';
+    } catch(err) {
+      this._logError(err);
+      console.log(err);
+      return '';
+    }
+  }
+
   async rpcGetBlockCount(): Promise<string> {
     try {
       this._runCheck('rpcGetBlockCount');
@@ -284,7 +361,7 @@ export class Avalanche extends Bitcoin {
             let count = 0;
             const patt = new RegExp(`^${key}.+?(\\d+)$`);
             const countIndex = splitText.findIndex(s => patt.test(s));
-            console.log(key, countIndex);
+            // console.log(key, countIndex);
             if(countIndex > -1) {
               const matches = splitText[countIndex].match(patt);
               const countStr = matches ? matches[1] : p;
@@ -292,48 +369,53 @@ export class Avalanche extends Bitcoin {
             }
             return count;
           });
-        // console.log(pCount, cCount, xCount);
         return [countArr].map(count => String(count)).join(',');
       } else {
-        console.log(p, c, x);
-        // const res = await request
-        //   .post(`http://127.0.0.1:${this.rpcPort}/ext/info`)
-        //   .set('Accept', 'application/json')
-        //   .timeout(this._requestTimeout)
-        //   .send({
-        //     id: '1',
-        //     jsonrpc: '2.0',
-        //     method: 'info.isBootstrapped',
-        //     params: {
-        //       chain: 'X',
-        //     },
-        //   });
-        // console.log(res.body);
-        return '0';
-        const res1 = await request
-          .post(`${this.endpoint()}/ext/bc/C/rpc`)
-          .set('Accept', 'application/json')
-          .timeout(this._requestTimeout)
-          .send({
-            id: '1',
-            jsonrpc: '2.0',
-            method: 'eth_syncing',
-            params: [],
-          });
-        console.log('res1', res1);
-        if(res1.body.result === false) {
-          return '0';
-        } else {
-          const { currentBlock } = res1.body.result;
-          const blockNum = parseInt(currentBlock, 16);
-          return blockNum > 0 ? String(blockNum) : '0';
-        }
+        const [
+          pHeight,
+          xHeight,
+          cHeight,
+        ] = await Promise.all([
+          this.getPHeight(),
+          this.getXHeight(),
+          this.getCHeight(),
+        ]);
+        return `${pHeight}/${xHeight}/${cHeight}`;
       }
     } catch(err) {
-      console.error(err);
       this._logError(err);
-      return '0';
+      return '';
     }
+  }
+
+  async getStatus(): Promise<string> {
+    let status;
+    try {
+      if(this.remote) {
+        const version = await this.rpcGetVersion();
+        status = version ? Status.RUNNING : Status.STOPPED;
+      } else {
+        const stats = await this._docker.containerInspect(this.id);
+        status = stats.State.Running ? Status.RUNNING : Status.STOPPED;
+      }
+    } catch(err) {
+      status = Status.STOPPED;
+    }
+    if(status !== Status.STOPPED) {
+      try {
+        const [ p, c, x ] = await Promise.all([
+          this.isBootstrapped('P'),
+          this.isBootstrapped('X'),
+          this.isBootstrapped('C'),
+        ]);
+        if(!p || !c || !x)
+          status = Status.SYNCING;
+      } catch(err) {
+        // do nothing with the error
+      }
+    }
+
+    return status;
   }
 
 }

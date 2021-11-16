@@ -100,6 +100,7 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
   name = 'Bitcoin';
   version: string;
   clientVersion: string;
+  archival = false;
   dockerImage: string;
   network: string;
   peerPort: number;
@@ -156,7 +157,8 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
     const versions = Bitcoin.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
     this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
-    this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
+    this.archival = data.archival || this.archival;
+    this.dockerImage = this.remote ? '' : (data.dockerImage || (versions && versions[0] ? versions[0].image : ''));
     if(docker)
       this._docker = docker;
   }
@@ -182,20 +184,27 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
     return {
       id: this.id,
       ticker: this.ticker,
-      version: this.version,
-      dockerImage: this.dockerImage,
+      network: this.network,
       peerPort: this.peerPort,
       rpcPort: this.rpcPort,
       rpcUsername: this.rpcUsername,
       rpcPassword: this.rpcPassword,
       client: this.client,
-      network: this.network,
       dockerCPUs: this.dockerCPUs,
       dockerMem: this.dockerMem,
       dockerNetwork: this.dockerNetwork,
       dataDir: this.dataDir,
       walletDir: this.walletDir,
       configPath: this.configPath,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      remote: this.remote,
+      remoteDomain: this.remoteDomain,
+      remoteProtocol: this.remoteProtocol,
+      version: this.version,
+      clientVersion: this.clientVersion,
+      archival: this.archival,
+      dockerImage: this.dockerImage,
     };
   }
 
@@ -258,6 +267,8 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
   stop():Promise<void> {
     return new Promise<void>(resolve => {
       if(this._instance) {
+        const { exitCode } = this._instance;
+        if(typeof exitCode === 'number') resolve();
         this._instance.on('exit', () => {
           clearTimeout(timeout);
           resolve();
@@ -280,6 +291,21 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
   _runCheck(method: string): void {
     if(!this.remote && !this._instance)
       throw new Error(`Instance must be running before you can call ${method}()`);
+  }
+
+  async isRunning(): Promise<boolean> {
+    if(this.remote) {
+      try {
+        const version = await this.rpcGetVersion();
+        return !!version;
+      } catch(err) {
+        // ignore error
+        return false;
+      }
+    } else {
+      const instance = this._instance;
+      return !(!instance || typeof instance.exitCode === 'number');
+    }
   }
 
   async rpcGetVersion(): Promise<string> {

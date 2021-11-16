@@ -19,6 +19,7 @@ export interface CryptoNodeData {
   name?: string;
   version?: string;
   clientVersion?: string;
+  archival?: boolean;
   dockerImage?: string;
   network?: string;
   peerPort?: number;
@@ -52,6 +53,7 @@ export interface CryptoNode {
   _requestTimeout: number;
   start(): Promise<ChildProcess>;
   stop(): void;
+  isRunning(): Promise<boolean>;
   toObject(): CryptoNodeData;
   generateConfig(): string;
   endpoint(): string;

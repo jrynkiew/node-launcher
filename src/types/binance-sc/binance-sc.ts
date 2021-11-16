@@ -77,6 +77,18 @@ export class BinanceSC extends Ethereum {
       case NodeClient.GETH:
         versions = [
           {
+            version: '1.1.2',
+            clientVersion: '1.1.2',
+            image: 'rburgett/bsc_geth:v1.1.2',
+            dataDir: '/blockchain/data',
+            walletDir: '/blockchain/keys',
+            configPath: '/blockchain/config.toml',
+            networks: [NetworkType.MAINNET],
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              return ` --config=${this.configPath}`;
+            },
+          },
+          {
             version: '1.1.0',
             clientVersion: '1.1.0',
             image: 'rburgett/bsc_geth:v1.1.0-beta',
@@ -145,6 +157,8 @@ export class BinanceSC extends Ethereum {
   ticker = 'bsc';
   name = 'Binance Smart Chain';
   version: string;
+  clientVersion: string;
+  archival = false;
   dockerImage: string;
   network: string;
   peerPort: number;
@@ -182,6 +196,7 @@ export class BinanceSC extends Ethereum {
     const versions = BinanceSC.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
     this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
+    this.archival = data.archival || this.archival;
     this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;

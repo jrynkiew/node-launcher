@@ -2,7 +2,7 @@ import 'should';
 import { Litecoin } from './litecoin/litecoin';
 import { Docker } from '../util/docker';
 import { CryptoNodeData } from '../interfaces/crypto-node';
-import { NetworkType, NodeEvent, NodeType, Status } from '../constants';
+import { DockerEvent, NetworkType, NodeEvent, NodeType, Status } from '../constants';
 import { v4 as uuid } from 'uuid';
 import { ChildProcess } from 'child_process';
 import { timeout } from '../util';
@@ -37,7 +37,11 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
 
     this.timeout(30000);
 
-    const docker = new Docker();
+    const docker = new Docker({
+      logDriver: 'none',
+    });
+    // docker.on(DockerEvent.INFO, console.log);
+
     let node;
     const initialNodeData: CryptoNodeData = {
       id: 'test-id',
@@ -161,7 +165,7 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
               id,
               network,
               client,
-            });
+            }, docker);
             node.start().should.be.a.Promise();
             await new Promise(resolve => setTimeout(resolve, 2000));
             await docker.kill(id);
@@ -170,7 +174,7 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
             node = new NodeConstructor({
               network,
               client,
-            });
+            }, docker);
             const instance = await node.start();
             instance.should.be.an.instanceOf(ChildProcess);
             await new Promise(resolve => setTimeout(resolve, 2000));
@@ -186,7 +190,7 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
             node = new NodeConstructor({
               network,
               client,
-            });
+            }, docker);
             await node.start();
             await new Promise(resolve => setTimeout(resolve, 2000));
             await node.stop();
@@ -203,7 +207,11 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
             node = new NodeConstructor({
               network,
               client,
-            });
+            }, docker);
+
+            // Log output
+            // node.on(NodeEvent.OUTPUT, console.log);
+
             await node.start();
             remoteNode = new NodeConstructor({
               network,
@@ -228,14 +236,22 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
             it('should resolve with the client version', async function() {
               const version = await node.rpcGetVersion();
               version.should.be.a.String();
-              version.should.equal(node.version);
+              version.should.equal(node.clientVersion);
             });
           });
           describe(`Remote ${name}.rpcGetVersion()`, function() {
             it('should resolve with the remote client version', async function() {
               const version = await remoteNode.rpcGetVersion();
               version.should.be.a.String();
-              version.should.equal(node.version);
+              version.should.equal(node.clientVersion);
+            });
+          });
+          describe(`${name}.isRunning() while running`, function() {
+            it('should resolve with a boolean indicating that the node is running', async function() {
+              const localRunningRes = await node.isRunning();
+              localRunningRes.should.be.True();
+              const remoteRunningRes = await remoteNode.isRunning();
+              remoteRunningRes.should.be.True();
             });
           });
           describe(`${name}.rpcGetBlockCount()`, function() {
@@ -276,7 +292,7 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
             });
           });
           describe(`Remote ${name}.getStatus() running`, function() {
-            it('should resolve with the current remote node status', async function() {
+            it('should resolve with the current running remote node status', async function() {
               const currentStatus = await remoteNode.getStatus();
               currentStatus.should.be.a.String();
               currentStatus.should.not.equal(Status.STOPPED);
@@ -295,10 +311,18 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
             });
           });
           describe(`Remote ${name}.getStatus() stopped`, function() {
-            it('should resolve with the current remote node status', async function() {
+            it('should resolve with the current stopped remote node status', async function() {
               const currentStatus = await remoteNode.getStatus();
               currentStatus.should.be.a.String();
               currentStatus.should.equal(Status.STOPPED);
+            });
+          });
+          describe(`${name}.isRunning() while stopped`, function() {
+            it('should resolve with a boolean indicating that the node is stopped', async function() {
+              const localStoppedRes = await node.isRunning();
+              localStoppedRes.should.be.False();
+              const remoteStoppedRes = await remoteNode.isRunning();
+              remoteStoppedRes.should.be.False();
             });
           });
         });
