@@ -28,7 +28,7 @@ const coreConfig = `
             "write_buffer": 838860
         },
         "DBPath": "data",
-        "LogLevel": "*:info, *:error",
+        "LogLevel": "*:error",
         "LogFormat": "plain",
         "Genesis": "config/genesis.json",
         "PrivValidatorKey": "priv_val_key.json",
@@ -179,6 +179,48 @@ export class Pocket extends Bitcoin {
       case NodeClient.CORE:
         versions = [
           {
+            version: 'RC-0.7.0.1',
+            clientVersion: 'RC-0.7.0.1',
+            image: 'rburgett/pocketcore:RC-0.7.0.1',
+            dataDir: '/root/.pocket',
+            walletDir: '/root/pocket-keys',
+            configPath: '',
+            networks: [NetworkType.MAINNET, NetworkType.TESTNET],
+            breaking: false,
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              const { network = '' } = data;
+              return ` start --${network.toLowerCase()} --useCache`;
+            },
+          },
+          {
+            version: 'RC-0.7.0',
+            clientVersion: 'RC-0.7.0',
+            image: 'rburgett/pocketcore:RC-0.7.0',
+            dataDir: '/root/.pocket',
+            walletDir: '/root/pocket-keys',
+            configPath: '',
+            networks: [NetworkType.MAINNET, NetworkType.TESTNET],
+            breaking: false,
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              const { network = '' } = data;
+              return ` start --${network.toLowerCase()} --useCache`;
+            },
+          },
+          {
+            version: 'RC-0.6.4.1',
+            clientVersion: 'RC-0.6.4.1',
+            image: 'rburgett/pocketcore:RC-0.6.4.1',
+            dataDir: '/root/.pocket',
+            walletDir: '/root/pocket-keys',
+            configPath: '',
+            networks: [NetworkType.MAINNET, NetworkType.TESTNET],
+            breaking: false,
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              const { network = '' } = data;
+              return ` start --${network.toLowerCase()} --useCache`;
+            },
+          },
+          {
             version: 'RC-0.6.4',
             clientVersion: 'RC-0.6.4',
             image: 'rburgett/pocketcore:RC-0.6.4',
@@ -186,6 +228,7 @@ export class Pocket extends Bitcoin {
             walletDir: '/root/pocket-keys',
             configPath: '',
             networks: [NetworkType.MAINNET, NetworkType.TESTNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               const { network = '' } = data;
               return ` start --${network.toLowerCase()} --useCache`;
@@ -199,6 +242,7 @@ export class Pocket extends Bitcoin {
             walletDir: '/root/pocket-keys',
             configPath: '',
             networks: [NetworkType.MAINNET, NetworkType.TESTNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               const { network = '' } = data;
               return ` start --${network.toLowerCase()}`;
@@ -212,6 +256,7 @@ export class Pocket extends Bitcoin {
             walletDir: '/root/pocket-keys',
             configPath: '',
             networks: [NetworkType.MAINNET, NetworkType.TESTNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               const { network = '' } = data;
               return ` start --${network.toLowerCase()}`;
@@ -320,9 +365,10 @@ export class Pocket extends Bitcoin {
     this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
     const versions = Pocket.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
-    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
+    const versionObj = versions.find(v => v.version === this.version) || versions[0] || {};
+    this.clientVersion = data.clientVersion || versionObj.clientVersion || '';
+    this.dockerImage = this.remote ? '' : data.dockerImage ? data.dockerImage : (versionObj.image || '');
     this.archival = data.archival || this.archival;
-    this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     this.domain = data.domain || this.domain;
     this.address = data.address || this.address;
 
@@ -333,7 +379,8 @@ export class Pocket extends Bitcoin {
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = Pocket.versions(this.client, this.network).find(({ version }) => version === this.version);
+    const versions = Pocket.versions(this.client, this.network);
+    const versionData = versions.find(({ version }) => version === this.version) || versions[0];
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {

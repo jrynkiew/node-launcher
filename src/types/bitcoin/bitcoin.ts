@@ -41,6 +41,7 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
             walletDir: '/opt/blockchain/wallets',
             configPath: '/opt/blockchain/bitcoin.conf',
             networks: [NetworkType.MAINNET, NetworkType.TESTNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` bitcoind -conf=${this.configPath}` + (data.network === NetworkType.TESTNET ? ' -testnet' : '');
             },
@@ -93,6 +94,60 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
       default:
         return '';
     }
+  }
+
+  static getAvailableUpgrade(node: CryptoNodeData, versions: VersionDockerImage[], nonBreaking = false): VersionDockerImage|null {
+    const { version } = node;
+    const idx = versions.findIndex(v => v.version === version);
+    // Already the latest version
+    if(idx === 0)
+      return null;
+    let updateIdx = 0;
+    for(let i = idx - 1; i >= 0; i--) {
+      if(versions[i].breaking) {
+        if(nonBreaking) {
+          updateIdx = i + 1;
+          // There is no non-breaking update available
+          if(updateIdx === idx)
+            return null;
+          break;
+        } else {
+          updateIdx = i;
+          break;
+        }
+      }
+    }
+    return versions[updateIdx];
+  }
+
+  static async upgradeNode(node: CryptoNodeData, versionData: VersionDockerImage): Promise<boolean> {
+    const {
+      version: origVersion,
+      clientVersion: origClientVersion,
+      dockerImage: origDockerImage,
+    } = node;
+    node.version = versionData.version;
+    node.clientVersion = versionData.clientVersion;
+    node.dockerImage = versionData.image;
+    if(versionData.upgrade) {
+      let success = false;
+      let upgradeErr: Error|null = null;
+      try {
+        success = await versionData.upgrade(node);
+      } catch(err) {
+        upgradeErr = err;
+      }
+      if(!success) {
+        node.version = origVersion;
+        node.clientVersion = origClientVersion;
+        node.dockerImage = origDockerImage;
+        if(upgradeErr)
+          throw upgradeErr;
+        else
+          return false;
+      }
+    }
+    return true;
   }
 
   id: string;
@@ -156,9 +211,10 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
     this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
     const versions = Bitcoin.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
-    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
+    const versionObj = versions.find(v => v.version === this.version) || versions[0] || {};
+    this.clientVersion = data.clientVersion || versionObj.clientVersion || '';
+    this.dockerImage = this.remote ? '' : data.dockerImage ? data.dockerImage : (versionObj.image || '');
     this.archival = data.archival || this.archival;
-    this.dockerImage = this.remote ? '' : (data.dockerImage || (versions && versions[0] ? versions[0].image : ''));
     if(docker)
       this._docker = docker;
   }
@@ -219,7 +275,8 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = Bitcoin.versions(this.client, this.network).find(({ version }) => version === this.version);
+    const versions = Bitcoin.versions(this.client, this.network);
+    const versionData = versions.find(({ version }) => version === this.version) || versions[0];
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -268,20 +325,29 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
     return new Promise<void>(resolve => {
       if(this._instance) {
         const { exitCode } = this._instance;
-        if(typeof exitCode === 'number') resolve();
-        this._instance.on('exit', () => {
-          clearTimeout(timeout);
+        if(typeof exitCode === 'number') {
           resolve();
-        });
-        this._instance.kill();
-        const timeout = setTimeout(() => {
-          this._docker.stop(this.id)
-            .then(() => resolve())
-            .catch(err => {
-              this._logError(err);
+        } else {
+          this._instance.on('exit', () => {
+            clearTimeout(timeout);
+            setTimeout(() => {
               resolve();
-            });
-        }, 30000);
+            }, 1000);
+          });
+          this._instance.kill();
+          const timeout = setTimeout(() => {
+            this._docker.stop(this.id)
+              .then(() => {
+                setTimeout(() => {
+                  resolve();
+                }, 1000);
+              })
+              .catch(err => {
+                this._logError(err);
+                resolve();
+              });
+          }, 30000);
+        }
       } else {
         resolve();
       }

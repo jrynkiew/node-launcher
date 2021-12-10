@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
 import { filterVersionsByNetworkType } from '../../util';
+import * as genesis from './genesis';
 
 const coreConfig = `
 [Eth]
@@ -84,6 +85,7 @@ export class BinanceSC extends Ethereum {
             walletDir: '/blockchain/keys',
             configPath: '/blockchain/config.toml',
             networks: [NetworkType.MAINNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config=${this.configPath}`;
             },
@@ -96,6 +98,7 @@ export class BinanceSC extends Ethereum {
             walletDir: '/blockchain/keys',
             configPath: '/blockchain/config.toml',
             networks: [NetworkType.MAINNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config=${this.configPath}`;
             },
@@ -144,10 +147,10 @@ export class BinanceSC extends Ethereum {
     }
   }
 
-  static async getGenesis(network: string): Promise<string> {
+  static getGenesis(network: string): string {
     switch(network) {
       case NetworkType.MAINNET: {
-        return await fs.readFile(path.resolve(__dirname, '../../../static/bsc-mainnet-genesis.json'), 'utf8');
+        return genesis.mainnet;
       } default:
         return '';
     }
@@ -195,15 +198,17 @@ export class BinanceSC extends Ethereum {
     this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
     const versions = BinanceSC.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
-    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
+    const versionObj = versions.find(v => v.version === this.version) || versions[0] || {};
+    this.clientVersion = data.clientVersion || versionObj.clientVersion || '';
+    this.dockerImage = this.remote ? '' : data.dockerImage ? data.dockerImage : (versionObj.image || '');
     this.archival = data.archival || this.archival;
-    this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = BinanceSC.versions(this.client, this.network).find(({ version }) => version === this.version);
+    const versions = BinanceSC.versions(this.client, this.network);
+    const versionData = versions.find(({ version }) => version === this.version) || versions[0];
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -240,7 +245,7 @@ export class BinanceSC extends Ethereum {
     const genesisExists = await fs.pathExists(genesisPath);
 
     if(!genesisExists) {
-      const genesis = await BinanceSC.getGenesis(this.network);
+      const genesis = BinanceSC.getGenesis(this.network);
       await fs.writeFile(genesisPath, genesis, 'utf8');
       await new Promise<void>((resolve, reject) => {
         this._docker.run(

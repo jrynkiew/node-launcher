@@ -37,6 +37,34 @@ export class Avalanche extends Bitcoin {
       case NodeClient.CORE:
         versions = [
           {
+            version: '1.7.2',
+            clientVersion: '1.7.2',
+            image: 'avaplatform/avalanchego:v1.7.2',
+            dataDir: '/root/db',
+            walletDir: '/root/keystore',
+            logDir: '/root/logs',
+            configPath: '/root/config.json',
+            networks: [NetworkType.MAINNET],
+            breaking: false,
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              return ` --config-file=${this.configPath}`;
+            },
+          },
+          {
+            version: '1.7.1',
+            clientVersion: '1.7.1',
+            image: 'avaplatform/avalanchego:v1.7.1',
+            dataDir: '/root/db',
+            walletDir: '/root/keystore',
+            logDir: '/root/logs',
+            configPath: '/root/config.json',
+            networks: [NetworkType.MAINNET],
+            breaking: false,
+            generateRuntimeArgs(data: CryptoNodeData): string {
+              return ` --config-file=${this.configPath}`;
+            },
+          },
+          {
             version: '1.6.5',
             clientVersion: '1.6.5',
             image: 'avaplatform/avalanchego:v1.6.5',
@@ -45,6 +73,7 @@ export class Avalanche extends Bitcoin {
             logDir: '/root/logs',
             configPath: '/root/config.json',
             networks: [NetworkType.MAINNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config-file=${this.configPath}`;
             },
@@ -58,6 +87,7 @@ export class Avalanche extends Bitcoin {
             logDir: '/root/logs',
             configPath: '/root/config.json',
             networks: [NetworkType.MAINNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config-file=${this.configPath}`;
             },
@@ -71,6 +101,7 @@ export class Avalanche extends Bitcoin {
             logDir: '/root/logs',
             configPath: '/root/config.json',
             networks: [NetworkType.MAINNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config-file=${this.configPath}`;
             },
@@ -84,6 +115,7 @@ export class Avalanche extends Bitcoin {
             logDir: '/root/logs',
             configPath: '/root/config.json',
             networks: [NetworkType.MAINNET],
+            breaking: false,
             generateRuntimeArgs(data: CryptoNodeData): string {
               return ` --config-file=${this.configPath}`;
             },
@@ -171,15 +203,17 @@ export class Avalanche extends Bitcoin {
     this.remoteProtocol = data.remoteProtocol || this.remoteProtocol;
     const versions = Avalanche.versions(this.client, this.network);
     this.version = data.version || (versions && versions[0] ? versions[0].version : '');
-    this.clientVersion = data.clientVersion || (versions && versions[0] ? versions[0].clientVersion : '');
+    const versionObj = versions.find(v => v.version === this.version) || versions[0] || {};
+    this.clientVersion = data.clientVersion || versionObj.clientVersion || '';
+    this.dockerImage = this.remote ? '' : data.dockerImage ? data.dockerImage : (versionObj.image || '');
     this.archival = data.archival || this.archival;
-    this.dockerImage = data.dockerImage || (versions && versions[0] ? versions[0].image : '');
     if(docker)
       this._docker = docker;
   }
 
   async start(): Promise<ChildProcess> {
-    const versionData = Avalanche.versions(this.client, this.network).find(({ version }) => version === this.version);
+    const versions = Avalanche.versions(this.client, this.network);
+    const versionData = versions.find(({ version }) => version === this.version) || versions[0];
     if(!versionData)
       throw new Error(`Unknown version ${this.version}`);
     const {
@@ -262,7 +296,6 @@ export class Avalanche extends Bitcoin {
         return '';
       }
     } catch(err) {
-      console.log(err.message + '\n' + err.stack);
       this._logError(err);
       return '';
     }
@@ -308,7 +341,6 @@ export class Avalanche extends Bitcoin {
       return Number(height) > 0 ? height : '';
     } catch(err) {
       this._logError(err);
-      console.error(err);
       return '';
     }
   }
@@ -334,7 +366,6 @@ export class Avalanche extends Bitcoin {
       return blockNum > 0 ? blockNum.toString(10) : '';
     } catch(err) {
       this._logError(err);
-      console.log(err);
       return '';
     }
   }
@@ -361,7 +392,6 @@ export class Avalanche extends Bitcoin {
             let count = 0;
             const patt = new RegExp(`^${key}.+?(\\d+)$`);
             const countIndex = splitText.findIndex(s => patt.test(s));
-            // console.log(key, countIndex);
             if(countIndex > -1) {
               const matches = splitText[countIndex].match(patt);
               const countStr = matches ? matches[1] : p;
