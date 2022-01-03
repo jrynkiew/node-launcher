@@ -100,7 +100,7 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
     const { version } = node;
     const idx = versions.findIndex(v => v.version === version);
     // Already the latest version
-    if(idx === 0)
+    if(idx < 1)
       return null;
     let updateIdx = 0;
     for(let i = idx - 1; i >= 0; i--) {
@@ -236,7 +236,7 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
     }
   }
 
-  toObject(): CryptoNodeData {
+  _toObject(): CryptoNodeData {
     return {
       id: this.id,
       ticker: this.ticker,
@@ -262,6 +262,10 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
       archival: this.archival,
       dockerImage: this.dockerImage,
     };
+  }
+
+  toObject(): CryptoNodeData {
+    return this._toObject();
   }
 
   generateConfig(): string {
@@ -308,6 +312,8 @@ export class Bitcoin extends EventEmitter implements CryptoNodeData, CryptoNode,
     if(!configExists)
       await fs.writeFile(configPath, this.generateConfig(), 'utf8');
     args = [...args, '-v', `${configPath}:${containerConfigPath}`];
+
+    await this._docker.pull(this.dockerImage, str => this._logOutput(str));
 
     await this._docker.createNetwork(this.dockerNetwork);
     const instance = this._docker.run(

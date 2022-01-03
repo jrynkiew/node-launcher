@@ -17,6 +17,7 @@ import { Avalanche } from './avalanche/avalanche';
 import { Pocket } from './pocket/pocket';
 import { Fuse } from './fuse/fuse';
 import { isNull } from 'lodash';
+import { Harmony } from './harmony/harmony';
 
 const chains: [{name: string, constructor: any}] = [
   {name: 'Bitcoin', constructor: Bitcoin},
@@ -30,6 +31,7 @@ const chains: [{name: string, constructor: any}] = [
   {name: 'Avalanche', constructor: Avalanche},
   {name: 'Pocket', constructor: Pocket},
   {name: 'Fuse', constructor: Fuse},
+  {name: 'Harmony', constructor: Harmony},
 ];
 
 chains.forEach(({ name, constructor: NodeConstructor }) => {
@@ -288,7 +290,8 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
             // node.on(NodeEvent.OUTPUT, console.log);
             // node.on(NodeEvent.ERROR, console.error);
             // node.on(NodeEvent.CLOSE, console.log);
-            node.start().should.be.a.Promise();
+            const res = await node.start();
+            res.should.be.an.instanceOf(ChildProcess);
             await new Promise(resolve => setTimeout(resolve, 2000));
             await docker.kill(id);
           });
@@ -303,7 +306,6 @@ chains.forEach(({ name, constructor: NodeConstructor }) => {
             const instance = await node.start();
             instance.should.be.an.instanceOf(ChildProcess);
             await new Promise(resolve => setTimeout(resolve, 2000));
-            const items = await docker.ps
             await new Promise(resolve => {
               node._instance.on('close', resolve);
               node._instance.kill();
